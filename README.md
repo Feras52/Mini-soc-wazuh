@@ -178,10 +178,69 @@ Both attack simulations produced events that were visible locally in Event Viewe
 
 ---
 
+## Phase 3: Custom Wazuh Detection Rules (XML) & MITRE ATT&CK Mapping
+
+### Executive Summary
+
+Phase 2 proved that the events reach the SIEM, but Wazuh's built-in rules only describe them generically (for example, "Logon Failure - Unknown user or bad password"). Phase 3 turns raw telemetry into **purpose-built detections**: two custom XML rules that recognize the lab's simulated attacks, raise them at a higher severity with a clear alert message, and tag them with the matching **MITRE ATT&CK** technique so an analyst immediately knows *how* the attacker operates.
+
+| Rule ID | Detects | Trigger Event | Severity | MITRE ATT&CK Technique |
+|---|---|---|---|---|
+| `100001` | Brute-force login attempts against `fake_admin_account` | Windows Event ID **4625** | **10** (High) | **T1110**: Brute Force |
+| `100002` | Suspicious PowerShell script block referencing an unauthorized payload (`fake_malware.exe`) | Windows Event ID **4104** | **12** (Critical) | **T1059.001**: Command and Scripting Interpreter: PowerShell |
+
+
+### Step 1: Write the Custom Rules File
+
+The rules live in `rules/custom_wazuh_rules.xml`. Both rules sit inside one group and follow the same structure.
+
+**Rule 100001: Brute-force detection**
+
+Builds on the parent rule `60106` (Windows Security events). It fires only when the event ID is **4625** *and* the log contains `fake_admin_account`, so it catches the failed-logon flood from `brute_force_simulation.ps1`. Severity is **10 (high)** and it is mapped to **T1110 (Brute Force)**.
+
+**Rule 100002: Obfuscated PowerShell detection**
+
+Builds on the parent rule `60000`. It fires when the event ID is **4104** *and* the decoded script block contains `fake_malware.exe`, the payload reference from `powershell_telemetry_test.ps1`. This works precisely because Script Block Logging (Phase 1) records the **decoded** command, so the Base64 obfuscation does not hide the payload from the rule. Severity is **12 (critical)** and it is mapped to **T1059.001 (PowerShell)**.
+
+---
+
+### Step 2: Deploy the Rules to the Wazuh Manager
+
+The manager runs inside Docker, so the rules file is copied into the container at the path Wazuh reads custom rules from, then the manager is restarted to load them.
+
+```powershell
+docker cp rules/custom_wazuh_rules.xml wazuh.manager:/var/ossec/etc/rules/local_rules.xml
+docker restart wazuh.manager
+```
+
+
+
+### Step 3: Test and Verify the Custom Alerts
+
+With the rules live, the two Phase 2 attack scripts were run again, and the resulting alerts were checked in the Wazuh Dashboard under **Threat Hunting → Events** by filtering on the custom rule IDs.
+
+**Brute-force alerts: `rule.id: 100001`**
+
+The query returned **5 hits**, one per failed login attempt. Each alert now carries the custom description *"SOC Lab Alert: Failed login attempt against fake_admin_account."* at **level 10**, instead of the generic level 5 alert seen in Phase 2.
+
+![Wazuh dashboard showing five alerts for custom rule 100001](screenshots/phase3_wazuh_rule_100001_brute_force.png)
+
+**Obfuscated PowerShell alerts: `rule.id: 100002`**
+
+The query returned **2 hits**, logged milliseconds apart. Each carries the custom *"SOC Lab Alert: Suspicious PowerShell script block..."* description at **level 12**, up from the generic level 4 alert seen in Phase 2.
+
+![Wazuh dashboard showing two alerts for custom rule 100002](screenshots/phase3_wazuh_rule_100002_powershell.png)
+
+### Phase 3 Outcome
+
+The same attack behavior that previously produced low-severity, generic alerts now triggers **custom, higher-severity detections with MITRE ATT&CK context**. This completes the loop of **telemetry → detection → mapped technique**.
+
+---
+
 ## Project Roadmap
 
 - [x] **Phase 1:** Environment architecture & auditing setup
 - [x] **Phase 2:** Attack Simulation & Telemetry Generation
-- [ ] **Phase 3:** Custom Wazuh detection rules (XML & MITRE ATT&CK mapping)
+- [x] **Phase 3:** Custom Wazuh detection rules (XML & MITRE ATT&CK mapping)
 - [ ] **Phase 4:** Fine-tuning & false positive analysis
 - [ ] **Phase 5:** Incident reports & portfolio assembly

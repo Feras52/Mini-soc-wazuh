@@ -1,0 +1,27 @@
+<!-- ================================================================= -->
+<!-- Custom Wazuh Detection Rules for Mini-SOC Lab                     -->
+<!-- Location: /var/ossec/etc/rules/local_rules.xml                    -->
+<!-- ================================================================= -->
+
+<group name="windows,security_lab,">
+
+  <!-- Rule 1: Detect failed login attempts -->
+  <rule id="100001" level="10">
+    <if_group>authentication_failed</if_group>
+    <field name="win.eventdata.targetUserName">^fake_admin_account$</field>
+    <description>SOC Lab Alert: Failed login attempt against fake_admin_account.</description>
+    <mitre><id>T1110</id></mitre>
+</rule>
+
+  <!-- Rule 2: Detect suspicious PowerShell script blocks -->
+  <rule id="100002" level="12">
+    <if_sid>91802</if_sid>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">fake_malware\.exe</field>
+    <description>SOC Lab Alert: Suspicious PowerShell script block detected.</description>
+    <mitre>
+      <id>T1059.001</id>
+    </mitre>
+  </rule>
+
+</group>
+
