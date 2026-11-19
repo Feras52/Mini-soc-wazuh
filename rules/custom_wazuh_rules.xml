@@ -13,15 +13,14 @@
     <mitre><id>T1110</id></mitre>
 </rule>
 
-  <!-- Rule 2: Detect suspicious PowerShell script blocks -->
-  <rule id="100002" level="12">
-    <if_sid>91802</if_sid>
-    <field name="win.eventdata.scriptBlockText" type="pcre2">fake_malware\.exe</field>
-    <description>SOC Lab Alert: Suspicious PowerShell script block detected.</description>
-    <mitre>
-      <id>T1059.001</id>
-    </mitre>
-  </rule>
+  <!-- Rule 2: Detect suspicious Office-to-interpreter process creation -->
+  <rule id="100002" level="10">
+    <if_sid>67027</if_sid>
+    <field name="win.eventdata.parentProcessName" type="pcre2">(?i)\\(WINWORD|EXCEL|POWERPNT|OUTLOOK)\.EXE$</field>
+    <field name="win.eventdata.newProcessName" type="pcre2">(?i)\\(powershell|pwsh|cmd|wscript|cscript|mshta)\.exe$</field>
+    <description>SOC Alert: Office application spawned a command interpreter or script host.</description>
+    <mitre><id>T1059</id></mitre>
+</rule>
 
 </group>
 
