@@ -1,308 +1,129 @@
-# Mini Security Operations Center (SOC) Lab: Endpoint Monitoring & Wazuh SIEM
+# Mini SOC Lab — Wazuh SIEM & Windows Endpoint Monitoring
 
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![Wazuh](https://img.shields.io/badge/Wazuh-00BFFF?style=for-the-badge&logoColor=white)
-![PowerShell](https://img.shields.io/badge/PowerShell-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Wazuh](https://img.shields.io/badge/Wazuh-00BFFF?style=flat-square&logo=wazuh&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-0078D4?style=flat-square&logo=windows&logoColor=white)
+![PowerShell](https://img.shields.io/badge/PowerShell-5391FE?style=flat-square&logo=powershell&logoColor=white)
 
----
+A hands-on **Security Operations Center (SOC) lab** built to practice endpoint telemetry collection, SIEM deployment, custom detection engineering, and alert investigation using **Wazuh**, **Docker Compose**, and a **Windows 11 endpoint**.
 
-## Project Overview
 
-This project simulates the end-to-end deployment and configuration of an enterprise-style **Security Information and Event Management (SIEM)** platform using **Wazuh**, paired with a **Windows endpoint** configured for advanced security telemetry.
+## Overview
 
-Instead of relying on default installations, the lab builds a solid monitoring foundation:
+The lab deploys a single-node Wazuh stack in Docker and connects a Windows endpoint through the Wazuh Agent. Windows Security events are collected and analyzed to demonstrate two detection use cases:
 
-- Deploying a containerized Wazuh stack with Docker Compose
-- Registering a secure host agent
-- Enabling Windows security auditing for failed logons and process creation
-- Simulating controlled security scenarios to generate Windows security telemetry
-- Building a foundation for custom detection rules and security alert investigation
+- Repeated failed logons against a dedicated, non-existent lab username.
+- Microsoft Office spawning a command interpreter or script host.
 
----
+The project covers the workflow from telemetry generation to SIEM alert review and basic false-positive analysis.
 
-## Lab Architecture & Topology
+## Architecture
 
-| Component | Description |
+```mermaid
+flowchart LR
+    A[Windows 11 Endpoint] -->|Wazuh Agent / TLS TCP 1514| B[Wazuh Manager]
+    B --> C[Wazuh Indexer]
+    C --> D[Wazuh Dashboard]
+    A -. Windows Security Events .-> A
+    E[Controlled Lab Simulations] --> A
+```
+
+| Component | Role |
 |---|---|
-| **SIEM Core** (Manager / Indexer / Dashboard) | Containerized single-node deployment running locally via Docker Compose |
-| **Target Endpoint** | Windows 11 host monitored by the Wazuh Agent service (`Wazuh`) |
-| **Agent → Manager transport** | TLS-encrypted, TCP port `1514` (telemetry) and `1515` (registration) |
-| **Web Dashboard** | HTTPS on port `443` |
+| Windows 11 + Wazuh Agent | Endpoint telemetry source |
+| Wazuh Manager 4.9.0 | Event decoding, rule matching, alert generation |
+| Wazuh Indexer 4.9.0 | Stores and indexes security data |
+| Wazuh Dashboard 4.9.0 | Search, filtering, and alert investigation |
+| Docker Compose | Runs the single-node SIEM stack |
 
-**Primary telemetry sources**
+## Detection Use Cases
 
-- Windows Security **Event ID 4625**: failed logon attempts
-- Windows Security **Event ID 4688**: process creation (used by Rule 100002)
+| Rule ID | Detection | Event | MITRE ATT&CK |
+|---|---|---|---|
+| `100001` | Intermediate match for failed logons to `fake_admin_account`; individual alert suppressed | 4625 | Correlation input |
+| `100003` | Three matching failed-logon events within 60 seconds (configured threshold) | 4625 | [T1110 – Brute Force](https://attack.mitre.org/techniques/T1110/) |
+| `100002` | Office application starts a command interpreter or script host | 4688 | [T1059 – Command and Scripting Interpreter](https://attack.mitre.org/techniques/T1059/) |
 
----
 
 ## Repository Structure
 
 ```text
 mini-soc-wazuh/
-├── docker-compose.yml             <-- Wazuh Docker stack blueprint
-├── config/                        <-- Manager, Indexer, and Dashboard configs
-├── attack_scripts/                <-- PowerShell attack simulation scripts
-│   └── brute_force_simulation.ps1     (Phase 2: generates Event ID 4625)
-├── rules/                         <-- Custom detection rules
-├── reports/                       <-- Formal incident report PDFs
-├── screenshots/                   <-- Wazuh dashboard evidence
-└── README.md                      <-- Project documentation & architecture
+├── docker-compose.yml
+├── generate-indexer-certs.yml
+├── config/
+│   ├── certs.yml
+│   ├── wazuh_cluster/
+│   ├── wazuh_dashboard/
+│   └── wazuh_indexer/
+├── attack_scripts/
+│   └── brute_force_simulation.ps1
+├── rules/
+│   └── custom_wazuh_rules.xml
+├── screenshots/
+│   ├── 4625_local.png
+│   ├── 4625_wazuh.png
+│   ├── 4688_local.png
+│   ├── 4688_wazuh.png
+│   ├── 100001_brute_force.png
+│   └── 100002_powershell.png
+└── README.md
 ```
 
----
+## Quick Start
 
-## Phase 1: Environment Architecture & Telemetry Configuration
+### Requirements
 
-### Executive Summary
+- Docker Desktop with Docker Compose
+- Windows 11 endpoint
+- Wazuh Agent compatible with the manager version
+- Administrator access for Windows audit-policy configuration
 
-The first phase established the core infrastructure. A single-node Wazuh stack was containerized with Docker Compose, and a Windows agent was deployed and connected to the manager. Windows auditing was configured to capture authentication failures and process creation events.
+### 1. Start the Wazuh stack
 
-### Infrastructure Profile
+From the directory containing `docker-compose.yml`:
 
-| Component | Value | Configuration Method / Tool |
-|---|---|---|
-| SIEM deployment model | Single-node stack | Docker Compose (`docker-compose.yml`) |
-| Web dashboard | `https://localhost` | OpenSearch Dashboards (port 443) |
-| Agent transport | TCP 1514 / 1515 | TLS-encrypted registration and data stream |
-| Target OS | Windows 11 host | Wazuh MSI installer (`wazuh-agent-4.9.0-1.msi`) |
-| Agent service | `wazuhSvc` | Windows Service Manager (`NET START`) |
-
----
-
-### Step 1: Deploy the SIEM with Docker Compose
 ```powershell
 docker compose up -d
+docker compose ps
 ```
----
 
-### Step 2: Install the Windows Agent
-The Wazuh Agent acts as an on-host sensor. It continuously reads Windows Event Logs and securely forwards them to the manager.
+Open the dashboard at `https://localhost` after the services become healthy.
+
+### 2. Connect the Windows endpoint
+
+Install the Wazuh Agent and configure it to communicate with the manager. The endpoint-side agent configuration should collect the required Windows Security events:
+
+- Event ID `4625` — failed logon
+- Event ID `4688` — process creation
+
+### 3. Enable Windows auditing
+
+Enable failure auditing for **Logon** and success auditing for **Process Creation**. Confirm the effective settings with `auditpol` and verify that the corresponding events appear in Windows Event Viewer.
+
+### 4. Load the custom rules
+
+Copy `rules/custom_wazuh_rules.xml` to the manager's custom rules directory and restart the manager:
 
 ```powershell
-Invoke-WebRequest -Uri "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.9.0-1.msi" -OutFile "wazuh-agent.msi"
-msiexec.exe /i "wazuh-agent.msi" WAZUH_MANAGER='127.0.0.1' /qn
-NET START wazuhSvc
-```
-
-### Step 3: Enable Advanced Windows Auditing
-
-**Why:** Default Windows configurations omit many events SOC analysts need. The lab uses Windows auditing to capture failed logons (Event ID 4625) and process creation (Event ID 4688). PowerShell Script Block Logging is retained as supplementary telemetry.
-
-#### A. Failed Logon Auditing (`auditpol`)
-
-Generates **Event ID 4625** whenever a logon fails (wrong password, account anomaly).
-
-```powershell
-auditpol /set /subcategory:"Logon" /failure:enable
+docker cp rules/custom_wazuh_rules.xml <wazuh-manager-container>:/var/ossec/etc/rules/local_rules.xml
+docker restart <wazuh-manager-container>
 ```
 
 
-#### B. PowerShell Script Block Logging (Registry)
+## Evidence
 
-This setting records PowerShell script block content as **Event ID 4104**. It remains an additional telemetry source in the lab, but the current Rule 100002 does not depend on Event ID 4104.
+### Failed logon telemetry — Event ID 4625
 
-```powershell
-New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Force
-Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name "EnableScriptBlockLogging" -Value 1
-```
+![Failed logon events in Wazuh](./screenshots/4625_wazuh.png)
 
-#### C. Process Creation Auditing (Event ID 4688)
+### Process creation telemetry — Event ID 4688
 
-Event ID 4688 records when a new process is created. We verified that successful process creation auditing was enabled with:
+![Process creation events in Wazuh](./screenshots/4688_wazuh.png)
 
-```powershell
-auditpol /get /subcategory:"Process Creation"
-```
+### Office-to-interpreter custom alert — Rule 100002
 
-The output showed `Process Creation Success`. This telemetry is used by Rule 100002.
-
----
-
-## Phase 2: Attack Simulation & Telemetry Generation
-
-### Executive Summary
-
-With auditing enabled, the SIEM needs events to analyze. Phase 2 generates failed logon events with a PowerShell simulation script and creates a real Word-to-PowerShell process relationship for the second test. We then verify that the resulting Windows events reach Wazuh through the agent and appear in the dashboard. **Detections cannot exist without telemetry**, so this phase produces the raw data used by Phase 3's custom rules.
-
-| Simulation | Script | Attacker Behavior | Windows Event Generated |
-|---|---|---|---|
-| Failed login simulation | `attack_scripts/brute_force_simulation.ps1` | Attempts to authenticate with a fake, non-existent username and invalid passwords | **4625** (account failed to log on) |
-| Office-to-interpreter process creation | Manual Word-to-PowerShell test | Microsoft Word starts `powershell.exe` | **4688** (process creation) |
-
-
-### Step 1: Simulate a Brute-Force Login Attack
-
-**Goal:** Generate **Event ID 4625** by attempting to authenticate as a non-existent user (`fake_admin_account`) with several invalid passwords.
-
-**How `brute_force_simulation.ps1` works:**
-
-1. Defines the fake target username and a small list of wrong passwords.
-2. Loops over each password and asks Windows to validate the credentials against the local account database.
-3. Every failed validation makes Windows write a 4625 event.
-4. Pauses 1 second between attempts to mimic a realistic automated tool.
-
-This controlled test targets a fake, non-existent username; it does not attempt to lock out a real account. It demonstrates failed-logon event collection, rather than testing a threshold-based brute-force detection algorithm.
-
----
-
-### Step 2: Simulate Office application spawning an interpreter
-
-**Goal:** Generate **Event ID 4688**, which records the creation of a new process. Our test checks whether Wazuh can identify Microsoft Word (`WINWORD.EXE`) starting PowerShell (`powershell.exe`).
-
-**How the test works:**
-
-1. Open a new Microsoft Word document.
-2. Add a hyperlink that points to `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`.
-3. Open the hyperlink to start PowerShell from Word.
-4. Close the PowerShell window without entering any commands.
-
-Windows records the new process in Event ID 4688. The event includes the parent process (`WINWORD.EXE`) and the newly created process (`powershell.exe`). This is the process relationship that Rule 100002 is designed to detect.
-
----
-
-### Step 3: Verify the Telemetry
-
-#### A. Locally in Windows Event Viewer
-
-Open **Windows Logs → Security** and look for **Event ID 4625** entries matching `fake_admin_account` and **Event ID 4688** entries related to the Word-to-PowerShell test. For Event ID 4688, inspect **New Process Name** (`powershell.exe`) and **Creator Process Name** (`WINWORD.EXE`).
-
-![4625_local](./screenshots/4625_local.png)
-![4688_local](./screenshots/4688_local.png)
-
-#### B. In the Wazuh Dashboard (Threat Hunting → Events)
-
-The two event types were checked in **Threat Hunting → Events** using DQL filters on the `data.win.system.eventID` field.
-
-**Failed logons: `data.win.system.eventID: "4625"`**
-![4625_wazuh](./screenshots/4625_wazuh.png)
-
-The query returned **5 hits**, one for each failed authentication attempt generated by the simulation. Wazuh classified these as rule `60122` (*Logon Failure - Unknown user or bad password*, level 5) from the endpoint agent.
-
-
-**Process creation: `data.win.system.eventID: "4688"`**
-
-![4688_wazuh](./screenshots/4688_wazuh.png)
-
-The query returned Windows process creation events matched by Wazuh's built-in rule `67027` (*A process was created*, level 3). The relevant test event showed Word as the parent process and PowerShell as the newly created process.
-
-
-
-### Phase 2 Outcome
-
-Both tests produced events that were visible locally in Event Viewer and centrally in Wazuh, validating the pipeline: **Windows auditing → Wazuh agent → Wazuh manager → Indexer → Dashboard**. Event ID 4625 provides the failed-logon telemetry for Rule 100001, while Event ID 4688 provides the process-creation telemetry for Rule 100002.
-
----
-
-## Phase 3: Custom Wazuh Detection Rules (XML) & MITRE ATT&CK Mapping
-
-### Executive Summary
-
-Phase 2 proved that the events reach the SIEM, but Wazuh's built-in rules only describe them generically (for example, "Logon Failure - Unknown user or bad password"). Phase 3 turns raw telemetry into **purpose-built detections**: three custom XML rules that recognize the lab's simulated behaviors. The failed-logon detection uses a base rule and a separate frequency-correlation rule, while the Office-to-interpreter detection remains independent.
-
-| Rule ID | Detects | Trigger Event | Severity | MITRE ATT&CK Technique |
-|---|---|---|---|---|
-| `100001` | Base match for failed logons against `fake_admin_account` (intermediate rule; no individual alert) | Windows Event ID **4625** | **5** (base rule) | Used by Rule `100003` |
-| `100003` | Three matching failed logons within 60 seconds | Windows Event ID **4625** | **10** (High) | **T1110**: Brute Force |
-| `100002` | An Office application starts a command interpreter or script host | Windows Event ID **4688** | **10** (High) | **T1059**: Command and Scripting Interpreter |
-
-
-### Step 1: Write the Custom Rules File
-
-The rules live in `rules/custom_wazuh_rules.xml`. All three rules sit inside one group and follow the same XML structure.
-
-**Rule 100001: Base failed-logon match**
-
-Rule `100001` matches failed authentication events in the `authentication_failed` group when the target username is exactly `fake_admin_account`. It has level 5 and uses `<options>no_log</options>`, so it acts as an intermediate rule and does not generate an individual alert.
-
-**Rule 100003: Frequency-based correlation**
-
-Rule `100003` references Rule `100001` with `<if_matched_sid>100001</if_matched_sid>`. With `frequency="3"` and `timeframe="60"`, it is intended to generate a level 10 alert when three matching base-rule events occur within 60 seconds. It is mapped to T1110 (Brute Force). The threshold behavior must be confirmed with fresh runtime tests before it is described as validated.
-
-**Rule 100002: Office-to-interpreter process creation detection**
-
-Builds on Wazuh's built-in rule `67027`, which recognizes Windows process creation events. It checks whether the parent process is a Microsoft Office application (`WINWORD.EXE`, `EXCEL.EXE`, `POWERPNT.EXE`, or `OUTLOOK.EXE`) and whether the newly created process is a command interpreter or script host. Severity is **10 (high)** and it is mapped to **T1059 (Command and Scripting Interpreter)**.
-
----
-
-### Step 2: Deploy the Rules to the Wazuh Manager
-
-The manager runs inside Docker, so the rules file is copied into the container at the path Wazuh reads custom rules from, then the manager is restarted to load them.
-
-```powershell
-docker cp rules/custom_wazuh_rules.xml mini-soc-wazuh-wazuh.manager-1:/var/ossec/etc/rules/local_rules.xml
-docker restart mini-soc-wazuh-wazuh.manager-1
-```
-
-### Step 3: Test and Verify the Custom Alerts
-
-
-**Failed-logon correlation: `rule.id: 100003`**
-
-The expected behavior is:
-
-- One matching failed-logon event: no Rule `100003` alert.
-- Two matching events within 60 seconds: no Rule `100003` alert.
-- Three matching events within 60 seconds: one threshold alert from Rule `100003` at level 10.
-- Three matching events that do not fall within the same 60-second window: no threshold alert from that set.
-
-**Office-to-interpreter alerts: `rule.id: 100002`**
-
-![4688_wazuh](./screenshots/100002_powershell.png)
-
-The alert carries the custom description *"SOC Alert: Office application spawned a command interpreter or script host."* at **level 10**.
-
-
-### Phase 3 Outcome
-
-The revised design separates failed-logon event matching from threshold correlation: Rule `100001` is the intermediate match, and Rule `100003` is intended to alert when three matching events occur within 60 seconds. Rule `100002` detects the specified Office-to-interpreter process relationship.
-
----
-
-## Phase 4: Detection Fine-Tuning & False Positive Analysis
-
-### Objective
-
-This phase evaluates the reliability and limitations of the three custom Wazuh rules used in the two detection use cases. The goal is to identify situations that may generate false positives and document possible improvements without assuming that every matching event represents malicious activity.
-
-### Rule 100001 / 100003 – Failed Login Detection
-
-**Detection:** Failed logon attempts targeting `fake_admin_account`  
-**Event ID:** 4625  
-**MITRE ATT&CK:** T1110 – Brute Force (Rule `100003`)  
-**Severity:** Level 5 base match (`100001`); Level 10 correlation alert (`100003`)
-
-The revised design uses two rules. Rule `100001` matches each failed logon for the lab username and suppresses its individual alert with `<options>no_log</options>`. Rule `100003` uses `if_matched_sid` with `frequency="3"` and `timeframe="60"` to detect three matching events within 60 seconds.
-
-**Potential false-positive scenarios:**
-- Repeated incorrect password attempts.
-- Applications using outdated credentials.
-- Misconfigured services attempting authentication.
-
-**Limitation:** The detection is restricted to the lab username `fake_admin_account`. It demonstrates threshold correlation for this controlled scenario; it is not a general failed-login detection policy. 
-
-**Tuning decision:** The earlier implementation placed `frequency` and `timeframe` on a rule using `if_group`. This was revised by separating the base match (`100001`) from the correlation rule (`100003`) using `if_matched_sid`. This makes the time-window correlation explicit in the rule structure.
-
-### Rule 100002 – Office Application Spawning Command Interpreters
-
-**Detection:** Microsoft Office applications launching command interpreters or script hosts  
-**Event ID:** 4688  
-**MITRE ATT&CK:** T1059 – Command and Scripting Interpreter  
-**Severity:** Level 10
-
-The rule identifies a potentially suspicious parent-child process relationship, such as Microsoft Word starting PowerShell.
-
-**Potential false-positive scenarios:**
-- Legitimate Office add-ins.
-- Approved business automation workflows.
-- Administrative tools interacting with Office applications.
-- Third-party software integrations.
-
-**Limitations:** This parent-child process relationship alone does not prove malicious activity. The current rule does not inspect process command-line arguments or independently determine whether the launched process is malicious.
-
-**Tuning decision:** The existing detection logic was retained. No confirmed false positives were identified during the lab tests. Further investigation could include command-line analysis and additional event context to help distinguish legitimate activity from suspicious execution.
-
----
+![Office spawning PowerShell alert](./screenshots/100002_powershell.png)
 
 ## Project Roadmap
 
@@ -310,4 +131,24 @@ The rule identifies a potentially suspicious parent-child process relationship, 
 - [x] **Phase 2:** Attack Simulation & Telemetry Generation
 - [x] **Phase 3:** Custom Wazuh detection rules (XML & MITRE ATT&CK mapping)
 - [x] **Phase 4:** Fine-tuning & false positive analysis
-- [ ] **Phase 5:** Incident reports & portfolio assembly
+- [x] **Phase 5:** Incident report & Readme file
+
+## Limitations
+
+- Rule `100001` is hard-coded to one lab username and is not a general failed-login detection.
+- Rule `100002` detects a parent-child process relationship; it does not prove malicious intent or inspect command-line arguments.
+
+- The project is a local lab, not a high-availability or production SOC deployment.
+
+## Detailed Report
+
+See [`Mini_SOC_Technical_Report.pdf`](./Mini_SOC_Technical_Report.pdf) for the full architecture, implementation review, detection analysis, evidence assessment, security findings, and recommendations.
+
+## References
+
+- [Wazuh 4.9 Rules XML Syntax](https://wazuh-documentation-49-master.readthedocs.io/en/latest/user-manual/ruleset/ruleset-xml-syntax/rules.html)
+- [Wazuh Rule Testing](https://documentation.wazuh.com/current/user-manual/ruleset/testing.html)
+- [Microsoft Event 4625 — Failed logon](https://learn.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4625)
+- [Microsoft Event 4688 — Process creation](https://learn.microsoft.com/en-us/windows/security/threat-protection/auditing/event-4688)
+- [MITRE ATT&CK T1110 — Brute Force](https://attack.mitre.org/techniques/T1110/)
+- [MITRE ATT&CK T1059 — Command and Scripting Interpreter](https://attack.mitre.org/techniques/T1059/)
