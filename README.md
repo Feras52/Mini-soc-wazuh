@@ -254,10 +254,65 @@ The two tested behaviors now trigger **custom alerts with clear descriptions, hi
 
 ---
 
+## Phase 4: Detection Fine-Tuning & False Positive Analysis
+
+### Objective
+
+This phase evaluates the reliability and limitations of the two custom Wazuh detection rules. The goal is to identify situations that may generate false positives and document possible improvements without assuming that every matching event represents malicious activity.
+
+### Rule 100001 – Failed Login Detection
+
+**Detection:** Failed logon attempts targeting `fake_admin_account`  
+**Event ID:** 4625  
+**MITRE ATT&CK:** T1110 – Brute Force  
+**Severity:** Level 10
+
+The current rule generates an alert for every matching failed login event.
+
+**Potential false-positive scenarios:**
+- Repeated incorrect password attempts.
+- Applications using outdated credentials.
+- Misconfigured services attempting authentication.
+
+**Limitation:** The rule is restricted to the lab username `fake_admin_account`. It detects individual failed logons and does not currently distinguish isolated mistakes from repeated attempts.
+
+#### Proposed tuning: Frequency-based correlation
+
+A frequency-based detection mechanism was added directly to Rule `100001`. Instead of generating an alert for every matching failed login event, the rule uses Wazuh's `frequency` and `timeframe` attributes to identify repeated attempts within a defined time window.
+
+The updated configuration works as follows:
+
+- **Rule `100001`:** Monitors failed authentication events targeting `fake_admin_account`.
+- **Frequency:** `3` – requires three matching events.
+- **Timeframe:** `60` – the events must occur within 60 seconds.
+
+This approach helps distinguish isolated authentication failures from repeated attempts that may indicate brute-force activity.
+
+### Rule 100002 – Office Application Spawning Command Interpreters
+
+**Detection:** Microsoft Office applications launching command interpreters or script hosts  
+**Event ID:** 4688  
+**MITRE ATT&CK:** T1059 – Command and Scripting Interpreter  
+**Severity:** Level 10
+
+The rule identifies a potentially suspicious parent-child process relationship, such as Microsoft Word starting PowerShell.
+
+**Potential false-positive scenarios:**
+- Legitimate Office add-ins.
+- Approved business automation workflows.
+- Administrative tools interacting with Office applications.
+- Third-party software integrations.
+
+**Limitations:** This parent-child process relationship alone does not prove malicious activity. The current rule does not inspect process command-line arguments or independently determine whether the launched process is malicious.
+
+**Tuning decision:** The existing detection logic was retained. No confirmed false positives were identified during the lab tests. Further investigation could include command-line analysis and additional event context to help distinguish legitimate activity from suspicious execution.
+
+---
+
 ## Project Roadmap
 
 - [x] **Phase 1:** Environment architecture & auditing setup
 - [x] **Phase 2:** Attack Simulation & Telemetry Generation
 - [x] **Phase 3:** Custom Wazuh detection rules (XML & MITRE ATT&CK mapping)
-- [ ] **Phase 4:** Fine-tuning & false positive analysis
+- [x] **Phase 4:** Fine-tuning & false positive analysis
 - [ ] **Phase 5:** Incident reports & portfolio assembly

@@ -6,7 +6,7 @@
 <group name="windows,security_lab,">
 
   <!-- Rule 1: Detect failed login attempts -->
-  <rule id="100001" level="10">
+  <rule id="100001" level="10" frequency="3" timeframe="60" >
     <if_group>authentication_failed</if_group>
     <field name="win.eventdata.targetUserName">^fake_admin_account$</field>
     <description>SOC Lab Alert: Failed login attempt against fake_admin_account.</description>
