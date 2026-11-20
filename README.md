@@ -198,21 +198,26 @@ Both tests produced events that were visible locally in Event Viewer and central
 
 ### Executive Summary
 
-Phase 2 proved that the events reach the SIEM, but Wazuh's built-in rules only describe them generically (for example, "Logon Failure - Unknown user or bad password"). Phase 3 turns raw telemetry into **purpose-built detections**: two custom XML rules that recognize the lab's simulated attacks, raise them at a higher severity with a clear alert message, and tag them with the matching **MITRE ATT&CK** technique so an analyst immediately knows *how* the attacker operates.
+Phase 2 proved that the events reach the SIEM, but Wazuh's built-in rules only describe them generically (for example, "Logon Failure - Unknown user or bad password"). Phase 3 turns raw telemetry into **purpose-built detections**: three custom XML rules that recognize the lab's simulated behaviors. The failed-logon detection uses a base rule and a separate frequency-correlation rule, while the Office-to-interpreter detection remains independent.
 
 | Rule ID | Detects | Trigger Event | Severity | MITRE ATT&CK Technique |
 |---|---|---|---|---|
-| `100001` | Failed logon attempts against `fake_admin_account` | Windows Event ID **4625** | **10** (High) | **T1110**: Brute Force |
+| `100001` | Base match for failed logons against `fake_admin_account` (intermediate rule; no individual alert) | Windows Event ID **4625** | **5** (base rule) | Used by Rule `100003` |
+| `100003` | Three matching failed logons within 60 seconds | Windows Event ID **4625** | **10** (High) | **T1110**: Brute Force |
 | `100002` | An Office application starts a command interpreter or script host | Windows Event ID **4688** | **10** (High) | **T1059**: Command and Scripting Interpreter |
 
 
 ### Step 1: Write the Custom Rules File
 
-The rules live in `rules/custom_wazuh_rules.xml`. Both rules sit inside one group and follow the same structure.
+The rules live in `rules/custom_wazuh_rules.xml`. All three rules sit inside one group and follow the same XML structure.
 
-**Rule 100001: Failed-logon detection**
+**Rule 100001: Base failed-logon match**
 
-It uses the Builds on the parent rule 60106 (Windows Security events). It fires only when the event ID is 4625 and the log contains fake_admin_account, so it catches the failed-logon flood from brute_force_simulation.ps1. Severity is 10 (high) and it is mapped to T1110 (Brute Force).
+Rule `100001` matches failed authentication events in the `authentication_failed` group when the target username is exactly `fake_admin_account`. It has level 5 and uses `<options>no_log</options>`, so it acts as an intermediate rule and does not generate an individual alert.
+
+**Rule 100003: Frequency-based correlation**
+
+Rule `100003` references Rule `100001` with `<if_matched_sid>100001</if_matched_sid>`. With `frequency="3"` and `timeframe="60"`, it is intended to generate a level 10 alert when three matching base-rule events occur within 60 seconds. It is mapped to T1110 (Brute Force). The threshold behavior must be confirmed with fresh runtime tests before it is described as validated.
 
 **Rule 100002: Office-to-interpreter process creation detection**
 
@@ -231,26 +236,26 @@ docker restart mini-soc-wazuh-wazuh.manager-1
 
 ### Step 3: Test and Verify the Custom Alerts
 
-With the rules live, we ran `brute_force_simulation.ps1` for Rule 100001 and performed the manual Word-to-PowerShell test for Rule 100002. The resulting alerts were checked in the Wazuh Dashboard under **Threat Hunting → Events** by filtering on the custom rule IDs.
 
-**Brute-force alerts: `rule.id: 100001`**
+**Failed-logon correlation: `rule.id: 100003`**
 
-![4688_wazuh](./screenshots/100001_brute_force.png)
+The expected behavior is:
 
-The query returned **5 hits**, one per failed login attempt. Each alert carries the custom description *"SOC Lab Alert: Failed login attempt against fake_admin_account."* at **level 10**, instead of the generic level 5 alert seen in Phase 2.
+- One matching failed-logon event: no Rule `100003` alert.
+- Two matching events within 60 seconds: no Rule `100003` alert.
+- Three matching events within 60 seconds: one threshold alert from Rule `100003` at level 10.
+- Three matching events that do not fall within the same 60-second window: no threshold alert from that set.
 
 **Office-to-interpreter alerts: `rule.id: 100002`**
 
 ![4688_wazuh](./screenshots/100002_powershell.png)
 
-The query returned **1 hit** for the verified Word-to-PowerShell test. The alert carries the custom description *"SOC Alert: Office application spawned a command interpreter or script host."* at **level 10**. The event details show `WINWORD.EXE` as the parent process and `powershell.exe` as the new process.
-
-
+The alert carries the custom description *"SOC Alert: Office application spawned a command interpreter or script host."* at **level 10**.
 
 
 ### Phase 3 Outcome
 
-The two tested behaviors now trigger **custom alerts with clear descriptions, higher severity levels, and MITRE ATT&CK context**. Rule 100001 identifies failed logons against the specified fake username, while Rule 100002 identifies the specified Office-to-interpreter process relationship. This completes the loop of **telemetry → detection → mapped technique**.
+The revised design separates failed-logon event matching from threshold correlation: Rule `100001` is the intermediate match, and Rule `100003` is intended to alert when three matching events occur within 60 seconds. Rule `100002` detects the specified Office-to-interpreter process relationship.
 
 ---
 
@@ -258,35 +263,25 @@ The two tested behaviors now trigger **custom alerts with clear descriptions, hi
 
 ### Objective
 
-This phase evaluates the reliability and limitations of the two custom Wazuh detection rules. The goal is to identify situations that may generate false positives and document possible improvements without assuming that every matching event represents malicious activity.
+This phase evaluates the reliability and limitations of the three custom Wazuh rules used in the two detection use cases. The goal is to identify situations that may generate false positives and document possible improvements without assuming that every matching event represents malicious activity.
 
-### Rule 100001 – Failed Login Detection
+### Rule 100001 / 100003 – Failed Login Detection
 
 **Detection:** Failed logon attempts targeting `fake_admin_account`  
 **Event ID:** 4625  
-**MITRE ATT&CK:** T1110 – Brute Force  
-**Severity:** Level 10
+**MITRE ATT&CK:** T1110 – Brute Force (Rule `100003`)  
+**Severity:** Level 5 base match (`100001`); Level 10 correlation alert (`100003`)
 
-The current rule generates an alert for every matching failed login event.
+The revised design uses two rules. Rule `100001` matches each failed logon for the lab username and suppresses its individual alert with `<options>no_log</options>`. Rule `100003` uses `if_matched_sid` with `frequency="3"` and `timeframe="60"` to detect three matching events within 60 seconds.
 
 **Potential false-positive scenarios:**
 - Repeated incorrect password attempts.
 - Applications using outdated credentials.
 - Misconfigured services attempting authentication.
 
-**Limitation:** The rule is restricted to the lab username `fake_admin_account`. It detects individual failed logons and does not currently distinguish isolated mistakes from repeated attempts.
+**Limitation:** The detection is restricted to the lab username `fake_admin_account`. It demonstrates threshold correlation for this controlled scenario; it is not a general failed-login detection policy. 
 
-#### Proposed tuning: Frequency-based correlation
-
-A frequency-based detection mechanism was added directly to Rule `100001`. Instead of generating an alert for every matching failed login event, the rule uses Wazuh's `frequency` and `timeframe` attributes to identify repeated attempts within a defined time window.
-
-The updated configuration works as follows:
-
-- **Rule `100001`:** Monitors failed authentication events targeting `fake_admin_account`.
-- **Frequency:** `3` – requires three matching events.
-- **Timeframe:** `60` – the events must occur within 60 seconds.
-
-This approach helps distinguish isolated authentication failures from repeated attempts that may indicate brute-force activity.
+**Tuning decision:** The earlier implementation placed `frequency` and `timeframe` on a rule using `if_group`. This was revised by separating the base match (`100001`) from the correlation rule (`100003`) using `if_matched_sid`. This makes the time-window correlation explicit in the rule structure.
 
 ### Rule 100002 – Office Application Spawning Command Interpreters
 
